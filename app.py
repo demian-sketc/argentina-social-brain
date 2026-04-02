@@ -3,70 +3,81 @@ import pandas as pd
 import os
 from groq import Groq
 
-# 1. CONFIGURACIÓN
-st.set_page_config(page_title="Argentina Brain: Social Intelligence", page_icon="🧠", layout="wide")
+# 1. CONFIGURACIÓN (Optimizada para móviles)
+st.set_page_config(page_title="Argentina Brain", page_icon="🧠", layout="wide")
+
+# Ocultar menú de Streamlit para que se vea más limpio en el celu
+st.markdown(""" <style> #MainMenu {visibility: hidden;} footer {visibility: hidden;} </style> """, unsafe_allow_html=True)
+
 client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
 
+@st.cache_data
+def load_data():
+    return pd.read_csv('comunidad.csv')
+
 if os.path.exists('comunidad.csv'):
-    df = pd.read_csv('comunidad.csv')
+    df = load_data()
 else:
-    st.error("No se encontró la base de datos.")
+    st.error("Base de datos no encontrada.")
     st.stop()
 
-# 2. INTERFAZ
-st.title("🧠 Brain On-Demand: Inteligencia Social Argentina")
-st.markdown("---")
+st.title("🧠 Brain On-Demand")
+st.caption("Inteligencia Social Argentina - v1.2")
 
+# 2. SEGMENTACIÓN (Mejorada para persistencia en móviles)
 with st.sidebar:
-    st.header("📊 Estado del Sistema")
-    st.metric("Población Total", len(df))
-    st.markdown("---")
-    st.header("🎯 Segmentación")
-    prov_sel = st.selectbox("Provincia:", ["Todas"] + sorted(df['provincia'].unique().tolist()))
-    ciudades = ["Todas"] + sorted(df[df['provincia'] == prov_sel]['ciudad'].unique().tolist()) if prov_sel != "Todas" else ["Todas"]
-    ciudad_sel = st.selectbox("Ciudad:", ciudades)
-    nse_sel = st.selectbox("NSE:", ["Todos"] + sorted(df['nse'].unique().tolist()))
+    st.header("🎯 Filtros")
+    
+    # Provincia con clave única
+    provincias = ["Todas"] + sorted(df['provincia'].unique().tolist())
+    prov_sel = st.selectbox("Provincia:", provincias, key="prov_filter")
+    
+    # Lógica de ciudades más robusta
+    if prov_sel != "Todas":
+        lista_ciudades = sorted(df[df['provincia'] == prov_sel]['ciudad'].unique().tolist())
+        ciudades = ["Todas"] + lista_ciudades
+    else:
+        ciudades = ["Todas"]
+    
+    # Ciudad con clave única para que el celu no se confunda
+    ciudad_sel = st.selectbox("Ciudad:", ciudades, key="city_filter")
+    
+    nse_sel = st.selectbox("NSE:", ["Todos"] + sorted(df['nse'].unique().tolist()), key="nse_filter")
+    
     st.markdown("---")
     n_agentes = st.slider("Voces en el panel:", 2, 12, 6)
 
-noticia = st.text_area("📰 Noticia o situación a testear:", placeholder="Escribí aquí...")
+# 3. ACCIÓN
+noticia = st.text_area("📰 Noticia a testear:", placeholder="Escriba aquí...")
 
-# 3. LÓGICA DE SIMULACIÓN
-if st.button("🚀 EJECUTAR ESTUDIO DE MERCADO"):
+if st.button("🚀 EJECUTAR ESTUDIO", use_container_width=True): # Botón ancho para el dedo en el celu
     universo = df.copy()
     if prov_sel != "Todas": universo = universo[universo['provincia'] == prov_sel]
     if ciudad_sel != "Todas": universo = universo[universo['ciudad'] == ciudad_sel]
     if nse_sel != "Todos": universo = universo[universo['nse'] == nse_sel]
     
-    st.write(f"🔬 **Análisis basado en una muestra de {len(universo)} perfiles del segmento.**")
+    st.info(f"🔬 Muestra: {len(universo)} perfiles.")
 
-    invitados = universo.sample(min(n_agentes, len(universo))).to_dict('records')
-    
-    debate_txt = ""
-    cols = st.columns(3)
-    for i, p in enumerate(invitados):
-        with cols[i % 3]:
-            prompt = f"Sos {p['nombre']}, {p['perfil']} de {p['ciudad']}. NSE: {p['nse']}. Reaccioná breve y argentino a: {noticia}"
-            rta = client.chat.completions.create(messages=[{"role": "system", "content": prompt}], model="llama-3.3-70b-versatile")
-            reaccion = rta.choices[0].message.content
-            st.info(f"👤 **{p['nombre']}** ({p['nse']})\n\n*{reaccion}*")
-            debate_txt += f"- {p['nombre']} ({p['sesgo']}): {reaccion}\n"
+    if len(universo) > 0:
+        invitados = universo.sample(min(n_agentes, len(universo))).to_dict('records')
+        
+        debate_txt = ""
+        # En móviles, las columnas se apilan solas. Usamos un diseño más simple.
+        for p in invitados:
+            with st.container():
+                prompt = f"Sos {p['nombre']}, {p['perfil']} de {p['ciudad']}. NSE: {p['nse']}. Reaccioná breve y argentino a: {noticia}"
+                rta = client.chat.completions.create(messages=[{"role": "system", "content": prompt}], model="llama-3.3-70b-versatile")
+                reaccion = rta.choices[0].message.content
+                st.markdown(f"**👤 {p['nombre']}** ({p['nse']})")
+                st.write(f"*{reaccion}*")
+                st.markdown("---")
+                debate_txt += f"- {p['nombre']}: {reaccion}\n"
 
-    st.markdown("---")
-    st.subheader("📊 DASHBOARD ESTRATÉGICO")
-    
-    with st.spinner("Generando reporte ejecutivo..."):
-        resumen_segmento = universo['sesgo'].value_counts().to_string()
-        prompt_dash = f"Analizá sociológicamente '{noticia}' con este contexto: {resumen_segmento} y estas voces: {debate_txt}. Reporte con Sentimiento, Riesgo y Conclusión."
-        rta_dash = client.chat.completions.create(messages=[{"role": "system", "content": prompt_dash}], model="llama-3.3-70b-versatile")
-        reporte_final = rta_dash.choices[0].message.content
-        st.success(reporte_final)
-
-        # BOTÓN DE DESCARGA
-        full_report = f"REPORTE DE INTELIGENCIA SOCIAL\nNoticia: {noticia}\nSegmento: {prov_sel}/{ciudad_sel}\n\n--- ANALISIS ---\n{reporte_final}\n\n--- VOCES TESTIGO ---\n{debate_txt}"
-        st.download_button(
-            label="📥 Descargar Reporte Completo (TXT)",
-            data=full_report,
-            file_name=f"reporte_{prov_sel}.txt",
-            mime="text/plain"
-        )
+        # DASHBOARD
+        with st.expander("📊 VER DASHBOARD ESTRATÉGICO", expanded=True):
+            resumen_segmento = universo['sesgo'].value_counts().to_string()
+            prompt_dash = f"Analizá sociológicamente '{noticia}' con este contexto: {resumen_segmento} y estas voces: {debate_txt}. Reporte con Sentimiento, Riesgo y Conclusión."
+            rta_dash = client.chat.completions.create(messages=[{"role": "system", "content": prompt_dash}], model="llama-3.3-70b-versatile")
+            st.success(rta_dash.choices[0].message.content)
+    else:
+        st.warning("No hay perfiles para esta combinación.")
